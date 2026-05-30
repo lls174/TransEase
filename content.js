@@ -1,5 +1,23 @@
 let translationPopup = null;
 let currentTargetLang = 'zh';
+let isSpeaking = false;
+let speakingType = null;
+
+const BCP47_MAP = {
+  zh: 'zh-CN',
+  en: 'en-US',
+  ja: 'ja-JP',
+  ko: 'ko-KR',
+  fr: 'fr-FR',
+  de: 'de-DE',
+  es: 'es-ES',
+  ru: 'ru-RU',
+  pt: 'pt-BR',
+  it: 'it-IT',
+  ar: 'ar-SA',
+  th: 'th-TH',
+  vi: 'vi-VN'
+};
 
 const LANGUAGES = [
   { code: 'zh', name: '中文' },
@@ -18,14 +36,16 @@ const LANGUAGES = [
 ];
 
 async function getSettings() {
-  const result = await chrome.storage.sync.get(['targetLang', 'triggerMode']);
+  const result = await chrome.storage.sync.get(['targetLang']);
   return {
-    targetLang: result.targetLang || 'zh',
-    triggerMode: result.triggerMode || 'select'
+    targetLang: result.targetLang || 'zh'
   };
 }
 
-function createPopup(selectedText) {
+async function createPopup(selectedText) {
+  const settings = await getSettings();
+  currentTargetLang = settings.targetLang;
+  stopSpeaking();
   removePopup();
 
   translationPopup = document.createElement('div');
@@ -42,11 +62,17 @@ function createPopup(selectedText) {
     </div>
     <div class="transease-content">
       <div class="transease-original">
-        <div class="transease-label">原文</div>
-        <div class="transease-text">${escapeHtml(selectedText)}</div>
+        <div class="transease-section-header">
+          <div class="transease-label">原文</div>
+          <button type="button" class="transease-speak-icon-btn" id="transease-speak-original" title="朗读原文">朗读</button>
+        </div>
+        <div class="transease-text transease-original-text" id="transease-original">${escapeHtml(selectedText)}</div>
       </div>
       <div class="transease-translation">
-        <div class="transease-label">译文</div>
+        <div class="transease-section-header">
+          <div class="transease-label">译文</div>
+          <button type="button" class="transease-speak-icon-btn" id="transease-speak-translation" title="朗读译文" disabled>朗读</button>
+        </div>
         <div class="transease-text transease-result" id="transease-result">
           <div class="transease-loading">
             <div class="transease-spinner"></div>
@@ -71,9 +97,100 @@ function createPopup(selectedText) {
 
   document.getElementById('transease-close').addEventListener('click', removePopup);
   document.getElementById('transease-copy').addEventListener('click', copyTranslation);
+  document.getElementById('transease-speak-original').addEventListener('click', () => toggleSpeak('original'));
+  document.getElementById('transease-speak-translation').addEventListener('click', () => toggleSpeak('translation'));
 
   positionPopup();
   translateText(selectedText);
+}
+
+function detectTextLang(text) {
+  if (/[\u4e00-\u9fff]/.test(text)) return 'zh-CN';
+  if (/[\u3040-\u309f\u30a0-\u30ff]/.test(text)) return 'ja-JP';
+  if (/[\uac00-\ud7af]/.test(text)) return 'ko-KR';
+  if (/[\u0600-\u06ff]/.test(text)) return 'ar-SA';
+  if (/[\u0e00-\u0e7f]/.test(text)) return 'th-TH';
+  if (/[\u0400-\u04ff]/.test(text)) return 'ru-RU';
+  if (/[\u00c0-\u024f]/.test(text)) return 'fr-FR';
+  if (/[\u0370-\u03ff]/.test(text)) return 'el-GR';
+  return 'en-US';
+}
+
+function updateSpeakButtons() {
+  const originalBtn = document.getElementById('transease-speak-original');
+  const translationBtn = document.getElementById('transease-speak-translation');
+  if (!originalBtn || !translationBtn) return;
+
+  const isOriginalSpeaking = isSpeaking && speakingType === 'original';
+  const isTranslationSpeaking = isSpeaking && speakingType === 'translation';
+
+  originalBtn.textContent = isOriginalSpeaking ? '停止' : '朗读';
+  translationBtn.textContent = isTranslationSpeaking ? '停止' : '朗读';
+  originalBtn.classList.toggle('transease-speaking', isOriginalSpeaking);
+  translationBtn.classList.toggle('transease-speaking', isTranslationSpeaking);
+}
+
+function stopSpeaking() {
+  if (window.speechSynthesis && (window.speechSynthesis.speaking || isSpeaking)) {
+    window.speechSynthesis.cancel();
+  }
+  isSpeaking = false;
+  speakingType = null;
+  updateSpeakButtons();
+}
+
+function toggleSpeak(type) {
+  if (isSpeaking && speakingType === type) {
+    stopSpeaking();
+    return;
+  }
+
+  let text = '';
+  let lang = '';
+
+  if (type === 'original') {
+    const originalEl = document.getElementById('transease-original');
+    if (!originalEl) return;
+    text = originalEl.textContent.trim();
+    lang = detectTextLang(text);
+  } else {
+    const translationEl = document.querySelector('#transease-result .transease-translation-text');
+    if (!translationEl) return;
+    text = translationEl.textContent.trim();
+    lang = BCP47_MAP[currentTargetLang] || currentTargetLang;
+  }
+
+  if (!text) return;
+  speakText(text, lang, type);
+}
+
+function speakText(text, lang, type) {
+  if (!window.speechSynthesis) return;
+
+  window.speechSynthesis.cancel();
+
+  const utterance = new SpeechSynthesisUtterance(text);
+  utterance.lang = lang;
+
+  utterance.onstart = () => {
+    isSpeaking = true;
+    speakingType = type;
+    updateSpeakButtons();
+  };
+
+  utterance.onend = () => {
+    isSpeaking = false;
+    speakingType = null;
+    updateSpeakButtons();
+  };
+
+  utterance.onerror = () => {
+    isSpeaking = false;
+    speakingType = null;
+    updateSpeakButtons();
+  };
+
+  window.speechSynthesis.speak(utterance);
 }
 
 function positionPopup() {
@@ -107,6 +224,7 @@ function positionPopup() {
 }
 
 function removePopup() {
+  stopSpeaking();
   if (translationPopup) {
     translationPopup.remove();
     translationPopup = null;
@@ -121,7 +239,13 @@ function escapeHtml(text) {
 
 async function translateText(text) {
   const resultDiv = document.getElementById('transease-result');
+  const translationSpeakBtn = document.getElementById('transease-speak-translation');
   if (!resultDiv) return;
+
+  stopSpeaking();
+  if (translationSpeakBtn) {
+    translationSpeakBtn.disabled = true;
+  }
 
   resultDiv.innerHTML = `
     <div class="transease-loading">
@@ -137,8 +261,16 @@ async function translateText(text) {
       targetLang: currentTargetLang
     });
 
+    if (!response) {
+      resultDiv.innerHTML = `<div class="transease-error">扩展连接失败，请刷新页面后重试</div>`;
+      return;
+    }
+
     if (response.success) {
       resultDiv.innerHTML = `<div class="transease-translation-text">${escapeHtml(response.translation)}</div>`;
+      if (translationSpeakBtn) {
+        translationSpeakBtn.disabled = false;
+      }
     } else {
       resultDiv.innerHTML = `<div class="transease-error">${escapeHtml(response.error)}</div>`;
     }

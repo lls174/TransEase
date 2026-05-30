@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "TransEase - AI翻译助手",
-  "version": "1.0.0",
-  "description": "选中文字即可翻译，支持自动识别源语言，使用AI智能翻译",
+  "version": "1.1.0",
+  "description": "右键选中文字即可翻译，支持自动识别源语言，使用AI智能翻译",
   "permissions": [
     "storage",
     "activeTab",

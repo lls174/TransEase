@@ -84,24 +84,29 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   }
 });
 
-chrome.runtime.onInstalled.addListener(() => {
-  chrome.storage.sync.set({
-    targetLang: 'zh',
-    triggerMode: 'select'
-  });
+chrome.runtime.onInstalled.addListener((details) => {
+  if (details.reason === 'install') {
+    chrome.storage.sync.set({
+      targetLang: 'zh'
+    });
+  }
 
-  chrome.contextMenus.create({
-    id: 'transease-translate',
-    title: 'TransEase 翻译',
-    contexts: ['selection']
+  chrome.contextMenus.removeAll(() => {
+    chrome.contextMenus.create({
+      id: 'transease-translate',
+      title: 'TransEase 翻译',
+      contexts: ['selection']
+    });
   });
 });
 
 chrome.contextMenus.onClicked.addListener((info, tab) => {
-  if (info.menuItemId === 'transease-translate' && info.selectionText) {
+  if (info.menuItemId === 'transease-translate' && info.selectionText && tab?.id) {
     chrome.tabs.sendMessage(tab.id, {
       action: 'showTranslation',
       text: info.selectionText
+    }).catch(() => {
+      console.warn('TransEase: 无法在此页面注入翻译功能，请刷新页面后重试');
     });
   }
 });
